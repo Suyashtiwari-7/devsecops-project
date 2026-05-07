@@ -99,3 +99,8 @@ $env:GITHUB_REF_NAME="dev"; python risk_engine.py; python dashboard_generator.py
 # Test as if deploying to MAIN (Should be CRITICAL risk, fails)
 $env:GITHUB_REF_NAME="main"; python risk_engine.py; python dashboard_generator.py
 ```
+
+---
+
+## 📄 License
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more details.
