@@ -1,299 +1,101 @@
-# 🛡 DevSecOps Automation Tool with Risk Prioritization
+# 🛡️ DevSecOps Automated Pipeline with Intelligent Risk Engine
 
 ## 📌 Overview
-This project implements an automated **DevSecOps Security Pipeline** integrated into **GitHub Actions**.
+This project implements an automated **DevSecOps Security Pipeline** built directly into GitHub Actions. Rather than taking the traditional approach of simply running scanners and failing builds over minor issues, this pipeline features an **Intelligent Risk Engine**. 
 
-It performs:
-
-- **Static Application Security Testing (SAST)**  
-  - Bandit (Python security linter)
-  - Semgrep (pattern-based static analysis)
-- **Dependency vulnerability scanning**  
-  - pip-audit (Python dependency vulnerability scanning)
-- **Risk-based analysis & prioritization**
-- **Automated policy enforcement (security gate)**
-- **Dashboard generation**
-- **Security artifact reporting for audit & review**
-
-Unlike traditional pipelines that only *run scanners*, this system also **interprets scan results**, calculates an **overall risk score/level**, and can **fail the pipeline automatically** when risk is too high.
+It aggregates raw JSON outputs from multiple SAST and dependency scanners (Bandit, Semgrep, pip-audit), calculates a contextual risk score based on both vulnerability severity and the deployment branch, enforces a strict security gate, and generates a visual HTML dashboard for auditability.
 
 ---
 
-## 🎯 Project Objective
+## 🎯 Project Motivation
 
-### Traditional approach (common in many teams)
-**Code → Deploy → Then Security**
+### The Challenge: "Scanner Fatigue"
+In many traditional CI/CD pipelines, security tools are bolted on at the end. They scan the code, find hundreds of "Low" severity warnings, and immediately fail the build. Developers often experience "alert fatigue," leading to friction between security and engineering teams.
 
-### This project’s approach (DevSecOps-first)
-**Code → Security Scan → Risk Evaluation → Policy Decision (Gate) → (Optional) Deploy**
+### The Solution: Context-Aware DevSecOps
+This project addresses that friction by placing a custom **Risk Engine** between the scanners and the deployment phase:
+**Code Push ➔ Run Scanners ➔ Risk Evaluation ➔ Policy Gate ➔ Deploy**
 
-Security becomes:
-
-- **Automated** (runs every push)
-- **Measurable** (risk scoring)
-- **Enforceable** (policy gate pass/fail)
-- **Auditable** (artifacts stored in Actions)
+By quantifying the actual risk and applying branch-based multipliers (e.g., being lenient on `dev` but strictly blocking `main`), security becomes **automated, measurable, and enforceable** without needlessly blocking developer velocity.
 
 ---
 
-## ⚙️ Architecture
+## ⚙️ Technical Architecture
 
 ### 1️⃣ Security Scanning Layer
-Integrated tools:
+The pipeline triggers on every push to `dev`, `staging`, or `main`. It runs three distinct security tools:
+* **Bandit:** Python-specific Static Application Security Testing (SAST). Scans for hardcoded passwords, unsafe imports, weak cryptography, etc.
+* **Semgrep:** Pattern-based SAST. Scans across the architecture for insecure logic and code patterns.
+* **pip-audit:** Software Composition Analysis (SCA). Scans `requirements.txt` against known CVE databases to find vulnerable dependencies.
 
-- **Bandit** — Python SAST scanning
-- **Semgrep** — SAST / insecure pattern detection
-- **pip-audit** — dependency vulnerability scanning (`requirements.txt`)
+*Note: All scanners are configured to output raw JSON (`-f json`) and exit with a code of `0` (`--exit-zero` or via bash fallback). This ensures the GitHub Action doesn't fail prematurely, passing the raw data directly to the Risk Engine.*
 
-The pipeline is triggered on pushes to:
-- `dev`
-- `staging`
-- `main`
+### 2️⃣ The Custom Risk Engine (`risk_engine.py`)
+This Python script serves as the decision-making core of the pipeline. It parses the JSON files from the scanners and calculates a final risk score.
 
-Outputs generated as JSON:
-- `bandit-results.json`
-- `semgrep-results.json`
-- `dependency-results.json`
+**Risk Scoring Logic:**
+1. **Base Severity Weights:** `LOW` = 1 | `MEDIUM` = 3 | `HIGH` = 5 | `CRITICAL` = 8.
+2. **Branch Multipliers:** The engine detects the active Git branch via environment variables (`GITHUB_REF_NAME`).
+   * `dev` ➔ 1x (Testing phase, lenient)
+   * `staging` ➔ 2x (Pre-prod, strict)
+   * `main` ➔ 3x (Production, extremely strict)
+3. **Calculation:** `Final Score = Base Score × Branch Multiplier`. 
 
-Workflow: `.github/workflows/security.yml`
+*Example:* A `HIGH` vulnerability (5 points) on the `dev` branch yields a score of 5 (MEDIUM Risk). That exact same code pushed to `main` yields a score of 15 (HIGH Risk), instantly failing the build.
 
----
+### 3️⃣ Policy Enforcement (The Security Gate)
+The `risk_engine.py` script enforces governance by making the final pipeline decision:
+* **LOW / MEDIUM (Score < 12):** `sys.exit(0)` ➔ ✅ Pipeline passes.
+* **HIGH / CRITICAL (Score ≥ 12):** `sys.exit(1)` ➔ ❌ Pipeline fails, deployment blocked.
 
-### 2️⃣ Intelligent Risk Engine
-Custom-built **`risk_engine.py`**:
-
-- Reads scan results JSON files
-- Aggregates findings
-- Calculates **severity distribution**
-- Produces an overall risk decision:
-  - `LOW`
-  - `MEDIUM`
-  - `HIGH`
-  - `CRITICAL`
-
-It generates a consolidated report:
-- `risk-summary.json`
-
-#### Risk scoring (how it works)
-Severity weights used by the engine:
-
-- LOW → 1  
-- MEDIUM → 3  
-- HIGH → 5  
-- CRITICAL → 8  
-
-Branch-based strictness (risk multiplier):
-
-- `dev` → 1×  
-- `staging` → 2×  
-- `main` → 3×  
-
-Core idea:
-- A **base score** is derived from scanner results (max severity weight detected)
-- A **branch multiplier** increases strictness as code moves closer to production
-- A **final score** is mapped into an overall risk category
+### 4️⃣ Visual Dashboard & Artifacts (`dashboard_generator.py`)
+Because raw JSON is unreadable for managers and auditors, the pipeline takes the consolidated `risk-summary.json` and dynamically generates a `dashboard.html` file (handling cross-platform UTF-8 encoding requirements). This HTML file, along with the raw scans, is zipped and uploaded to GitHub Actions as an **Artifact** for compliance and review.
 
 ---
 
-### 3️⃣ Policy Enforcement (Security Gate)
-Pipeline logic:
+## 🚀 Key Highlights & Differentiators
 
-- `LOW` / `MEDIUM` → ✅ Allow pipeline to continue
-- `HIGH` / `CRITICAL` → ❌ Fail the build (remediation required)
-
-This ensures:
-
-- Risky code is **blocked automatically**
-- Security becomes part of **CI/CD governance**
-- Builds provide a clear **pass/fail security decision**
+* **Custom Aggregation over Out-of-the-Box:** Instead of just dropping a generic GitHub Action into a workflow, this pipeline uses a custom Python engine to ingest JSON outputs from multiple disparate tools, standardizing their severities (e.g., mapping Semgrep's INFO/WARNING/ERROR to LOW/MEDIUM/HIGH) into a single unified risk profile.
+* **Context-Aware Security:** Demonstrates an understanding that a vulnerability in a test environment isn't as critical as the same vulnerability in production. The dynamic multiplier reflects real-world DevSecOps maturity.
+* **Active Security Gate:** The pipeline doesn't just act as a passive scanner; it actively enforces governance by deliberately returning exit codes to block risky deployments.
 
 ---
 
-### 4️⃣ Dashboard & Reporting
-The pipeline generates and uploads security artifacts per run, including:
-
-- raw scanner outputs (JSON)
-- consolidated risk report
-- HTML dashboard for visibility
-
-Artifacts are uploaded via GitHub Actions for audit, review, and evidence.
-
----
-
-## 📊 Key Features
-
-- ✔ Automated CI/CD security integration (GitHub Actions)
-- ✔ Multi-tool security scanning (Bandit + Semgrep + pip-audit)
-- ✔ Risk-based prioritization & scoring
-- ✔ Policy-driven enforcement (security gate)
-- ✔ HTML security dashboard for visibility
-- ✔ Artifact-based audit trail (downloadable reports)
-- ✔ Branch-aware strictness (dev vs staging vs main)
-
----
-
-## 🏗 Workflow Structure
-
-**Push → GitHub Actions Trigger → Install Tools → Run Scanners → Generate JSON → Run Risk Engine → Enforce Policy → Generate Dashboard → Upload Artifacts**
-
-Workflow file:
-- `.github/workflows/security.yml`
-
----
-
-## 📁 Project Structure
+## 📂 Project Structure
 
 ```text
 devsecops-project/
-│
-├── app.py
-├── risk_engine.py
-├── dashboard_generator.py
-├── requirements.txt
-│
-└── .github/
-    └── workflows/
-        └── security.yml
+├── .github/workflows/security.yml  # The CI/CD GitHub Actions definition
+├── app.py                          # Sample Python application (contains intentional vulnerabilities for testing)
+├── requirements.txt                # Python dependencies (contains vulnerable packages for testing)
+├── risk_engine.py                  # The custom Python script that calculates risk scores
+└── dashboard_generator.py          # Generates the visual HTML report
 ```
 
 ---
 
-## 📦 Outputs (What you get after a run)
+## 💻 How to Run & Test Locally
 
-After each GitHub Actions run (or local run), the pipeline produces these outputs:
+You can test the Risk Engine on your own machine. 
 
-### Raw scanner reports
-- `bandit-results.json` — Bandit SAST findings (Python)
-- `semgrep-results.json` — Semgrep findings (code patterns / SAST)
-- `dependency-results.json` — pip-audit dependency vulnerability report
-
-### Consolidated risk report
-- `risk-summary.json` — unified risk score, risk level, severity distributions, and policy evaluation
-
-### Visual report
-- `dashboard.html` — HTML dashboard showing:
-  - overall risk level + score
-  - tool-wise findings
-  - severity breakdown
-  - policy pass/fail status
-  - branch + metadata
-
-### Where to find them in GitHub Actions
-These outputs are uploaded as an artifact (named **`security-reports`**) in the workflow run.
-
----
-
-## 🚀 Quick Start (Run locally)
-
-### Prerequisites
-- Python 3.10+
-- pip
-
-### 1) Install project dependencies
-```bash
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 2) Install security tools
+### 1. Install Requirements
 ```bash
 pip install bandit semgrep pip-audit
 ```
 
-### 3) Run scanners
+### 2. Run the Scanners
 ```bash
-bandit -r . -x ./venv,./.venv,./.git -f json -o bandit-results.json --exit-zero
-
-semgrep scan --config=auto \
-  --exclude=venv --exclude=.venv --exclude=.git \
-  --json --output=semgrep-results.json
-
-pip-audit -r requirements.txt -f json -o dependency-results.json 2>/dev/null \
-  || echo '{"dependencies": []}' > dependency-results.json
+python -m bandit -r . -x ./venv,./.venv,./.git -f json -o bandit-results.json --exit-zero
+python -m semgrep scan --config=auto --exclude=venv --exclude=.venv --exclude=.git --json --output=semgrep-results.json
+python -m pip_audit -r requirements.txt -f json -o dependency-results.json || echo '{"dependencies": []}' > dependency-results.json
 ```
 
-### 4) Run risk engine (policy gate)
-```bash
-python3 risk_engine.py
+### 3. Run the Engine & Dashboard
+Test how the risk changes by pretending to be on different branches:
+```powershell
+# Test as if deploying to DEV (Should be MEDIUM risk, passes)
+$env:GITHUB_REF_NAME="dev"; python risk_engine.py; python dashboard_generator.py
+
+# Test as if deploying to MAIN (Should be CRITICAL risk, fails)
+$env:GITHUB_REF_NAME="main"; python risk_engine.py; python dashboard_generator.py
 ```
-
-What this does:
-- prints a summary to the console
-- writes `risk-summary.json`
-- exits with:
-  - `0` if policy passes (LOW/MEDIUM)
-  - `1` if policy fails (HIGH/CRITICAL)
-
-### 5) Generate dashboard
-```bash
-python3 dashboard_generator.py
-```
-
-Output:
-Open it in a browser:
-- `dashboard.html`
-- LOW / MEDIUM → pass
-<img width="1856" height="1006" alt="Screenshot from 2026-02-23 13-22-13" src="https://github.com/user-attachments/assets/7341205a-e353-4957-9f19-d433acf57fe2" />
-<img width="1856" height="1006" alt="Screenshot from 2026-02-23 13-35-50" src="https://github.com/user-attachments/assets/745f4ba5-6e11-489f-b024-1626c5dfa526" />
-
-- HIGH / CRITICAL → fail
-<img width="1856" height="1006" alt="Screenshot from 2026-02-23 13-39-26" src="https://github.com/user-attachments/assets/6612b94e-32b4-461d-a4f7-da95e0351738" />
-<img width="1856" height="1006" alt="Screenshot from 2026-02-23 13-40-16" src="https://github.com/user-attachments/assets/f6095223-c7ce-4e7a-a765-bb1d00345112" />
-
-
----
-
-## 🔎 Viewing artifacts in GitHub Actions
-After a workflow run completes:
-
-1. Go to the repository → **Actions**
-2. Open the latest workflow run
-3. Scroll to **Artifacts**
-4. Download **security-reports**
-5. Review:
-   - JSON scan outputs
-   - `risk-summary.json`
-   - `dashboard.html`
-
----
-
-## 🚀 Future Scope (Next-Level Enhancements)
-
-### 1️⃣ Risk Trend Tracking (Security Analytics Layer)
-Store results from every pipeline run:
-
-- risk score
-- total vulnerabilities
-- severity distribution
-- policy result
-
-Then generate trend graphs to track improvement or regression over time.
-
-### 2️⃣ Developer Security Score
-Track per-developer security impact:
-
-- number of policy failures triggered
-- risk introduced per commit/PR
-- improvement trend
-
-Useful for governance and DevSecOps maturity metrics.
-
-### 3️⃣ Context-Based Risk Multipliers (Adaptive Risk)
-Enhance scoring model:
-
-**Final Risk = Base Score × Branch Weight × File Sensitivity × Exposure Level**
-
-Examples:
-- `main` branch → higher multiplier
-- `auth.py` or security-critical modules → higher multiplier
-- public API code → higher multiplier
-
-This enables context-aware prioritization and stronger policy enforcement.
-
-### 4️⃣ Multi-Scanner Orchestration
-Add more scanners for deeper coverage:
-
-- Trivy (container security scanning)
-- Checkov/tfsec (IaC scanning)
-- Secret scanning (Gitleaks)
-- SBOM generation + validation
