@@ -1,0 +1,14 @@
+# Security scan results
+*-results.json
+results.json
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class

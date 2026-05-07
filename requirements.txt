@@ -1,0 +1,2 @@
+# Application dependencies
+requests==2.19.0

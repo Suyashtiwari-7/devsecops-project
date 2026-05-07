@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-05-07T14:02:21.105913",
+  "branch": "main",
+  "overall_risk": "CRITICAL",
+  "final_score": 24,
+  "components": {
+    "bandit": {
+      "score": 5,
+      "total_findings": 7,
+      "severity_distribution": {
+        "LOW": 5,
+        "MEDIUM": 0,
+        "HIGH": 2,
+        "CRITICAL": 0
+      }
+    },
+    "semgrep": {
+      "score": 3,
+      "total_findings": 1,
+      "severity_distribution": {
+        "LOW": 0,
+        "MEDIUM": 1,
+        "HIGH": 0,
+        "CRITICAL": 0
+      }
+    },
+    "dependencies": {
+      "score": 8,
+      "total_vulnerabilities": 17,
+      "severity_distribution": {
+        "LOW": 0,
+        "MEDIUM": 0,
+        "HIGH": 17,
+        "CRITICAL": 0
+      }
+    }
+  },
+  "policy_enforcement": {
+    "rule": "Fail if risk is HIGH or CRITICAL",
+    "passed": false,
+    "requires_remediation": true
+  }
+}

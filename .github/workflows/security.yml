@@ -1,0 +1,60 @@
+name: DevSecOps Security Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - staging
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Security Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit semgrep pip-audit
+
+      - name: Run Bandit Scan
+        run: |
+          bandit -r . \
+            -x ./venv,./.venv,./.git \
+            -f json -o bandit-results.json \
+            --exit-zero
+
+      - name: Run Semgrep Scan
+        run: |
+          semgrep scan --config=auto \
+            --exclude=venv --exclude=.venv --exclude=.git \
+            --json --output=semgrep-results.json
+
+      - name: Run Dependency Scan
+        run: |
+          pip-audit -r requirements.txt -f json -o dependency-results.json 2>/dev/null || echo '{"dependencies": []}' > dependency-results.json
+
+      - name: Run Unified Risk Engine
+        run: python3 risk_engine.py
+
+      - name: Generate Dashboard
+        run: python3 dashboard_generator.py
+
+      - name: Upload Security Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            bandit-results.json
+            semgrep-results.json
+            dependency-results.json
+            risk-summary.json
+            dashboard.html
